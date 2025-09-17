@@ -1,0 +1,63 @@
+# config.yaml
+repositories:
+# Repository with specific branches and HTTP auth
+- name: "main-app"
+  url: "https://github.com/username/main-app.git"
+  branches: [ "main", "develop", "staging" ]
+  path: "github/main-app"
+  period: "5m"
+  auth:
+    type: "http"
+    username: "your-username"
+    password: "ghp_your_github_token"
+
+# Repository with all branches (*) and SSH auth
+- name: "api-service"
+  url: "git@github.com:username/api-service.git"
+  branches: [ "*" ] # Sync all branches
+  path: "github/api-service"
+  period: "10m"
+  auth:
+    type: "ssh"
+    ssh_key_path: "/root/.ssh/id_rsa"
+
+# Public repository (no auth needed)
+- name: "public-lib"
+  url: "https://github.com/open-source/library.git"
+  branches: [ "main" ]
+  path: "github/public-lib"
+  period: "30m"
+  auth:
+    type: "none"
+
+# GitLab repository with HTTP auth
+- name: "infrastructure"
+  url: "https://gitlab.com/company/infrastructure.git"
+  branches: [ "master", "production" ]
+  path: "gitlab/infrastructure"
+  period: "15m"
+  auth:
+    type: "http"
+    username: "deploy-user"
+    password: "glpat_your_gitlab_token"
+
+# Bitbucket repository with SSH
+- name: "legacy-system"
+  url: "git@bitbucket.org:company/legacy.git"
+  branches: [ "master" ]
+  path: "bitbucket/legacy"
+  period: "1h"
+  auth:
+    type: "ssh"
+    ssh_key_path: "/root/.ssh/bitbucket_key"
+
+# Self-hosted Git with custom branch
+- name: "internal-tools"
+  url: "https://git.company.com/tools/internal.git"
+  branches: [ "release" ]
+  path: "internal/tools"
+  period: "20m"
+  auth:
+    type: "http"
+    username: "backup-service"
+    password: "custom_token_here"

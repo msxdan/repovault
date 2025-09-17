@@ -1,0 +1,12 @@
+# config.yaml
+repositories:
+- name: "insurance"
+  url: "git@github.com:masmovil/insurance.git"
+  branches: [ "*" ]
+  period: "6h"
+  force_push_protection: "sync_anyway" # Allow force push on feature branches
+  protect_default_branch: "backup_and_sync" # But protect main/master branch
+  auth:
+    type: "ssh"
+    ssh_key_path: "ssh-keys/github_com_ed25519"
+    ssh_key_password: $REPOVAULT_SSH_KEY_PASSWORD

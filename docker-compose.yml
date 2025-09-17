@@ -1,0 +1,53 @@
+# docker-compose.yml
+services:
+  repovault:
+    build: .
+    image: repovault:latest
+    container_name: repovault
+    restart: unless-stopped
+    environment:
+      - TZ=CET
+      - PUID=1001
+      - PGID=1001
+      - SSH_KNOWN_HOSTS=/home/gituser/.ssh/known_hosts
+    env_file:
+      - .env # Load secrets from .env file
+    volumes:
+      - ./test.yaml:/config/config.yaml:ro
+      - ./ssh-keys:/app/ssh-keys:ro
+      - ./backup:/backup:rw
+      - ./gitconfig:/home/gituser/.gitconfig:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+        reservations:
+          memory: 256M
+          cpus: "0.25"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "pgrep", "repovault"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+    name: repovault
+    driver: bridge
+
+volumes:
+  backup-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./backup
