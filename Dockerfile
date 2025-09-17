@@ -1,6 +1,6 @@
 # Dockerfile
 # Multi-stage build for smaller final image
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install git and ca-certificates (needed for git operations)
 RUN apk add --no-cache git ca-certificates openssh-client
