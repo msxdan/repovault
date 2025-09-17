@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=images/logo.png />
+  <img src=images/logov2.png />
   <h1 align="center">RepoVault 🔐</h1>
   <p align="center">Simple to use git backup solution.</p>
   <p align="center">
