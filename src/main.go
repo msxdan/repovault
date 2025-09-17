@@ -438,7 +438,7 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 						dirtyDetails = append(dirtyDetails, fmt.Sprintf("%s (%s/%s)", path, statusCodeString(st.Staging), statusCodeString(st.Worktree)))
 					}
 				}
-				rv.logWarn("%s/%s: Reset dirty working directory (blocking checkout): %d paths: %s", repoID, branchName, len(dirtyDetails), strings.Join(dirtyDetails, ", "))
+				rv.logWarn("%s/%s: Reset dirty working directory (blocking checkout)", repoID, branchName)
 				if rErr := worktree.Reset(&git.ResetOptions{Commit: head.Hash(), Mode: git.HardReset}); rErr != nil {
 					return fmt.Errorf("failed to reset working directory: %v", rErr)
 				}

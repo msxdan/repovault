@@ -142,6 +142,9 @@ repositories:
 | `auth.ssh_key_path`     | Path to SSH private key                      | `"/ssh/id_rsa"`                      |
 | `auth.ssh_key_password` | Password to decrypt SSH Key (if encrypted)   | `"MySuperSecretPass"`                |
 
+> [!WARNING]
+> Use \* in branches with caution, backing up too many branches could take forever and reach update period before finish initial sync
+
 ## 🔐 Authentication Methods
 
 ### SSH Key Authentication
