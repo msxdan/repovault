@@ -20,6 +20,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	gossh "golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
@@ -298,7 +299,7 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
 	}
 
 	totalDuration := time.Since(startTime)
-	nextSync := time.Now().Add(period).Format("15:04")
+	nextSync := time.Now().Add(period).Format("15:04:05")
 
 	// Calculate repository size
 	rv.logInfo("%s: Calculating repository size...", repoID)
@@ -496,13 +497,17 @@ func (rv *RepoVault) getAuth(authConfig Auth) (transport.AuthMethod, error) {
 		// Expand environment variables for SSH key password
 		passphrase := expandEnvVars(authConfig.SSHKeyPassword)
 
+		//publicKey, err := ssh.NewPublicKeys("git", sshKey, passphrase)
 		publicKey, err := ssh.NewPublicKeys("git", sshKey, passphrase)
 		if err != nil {
-			if strings.Contains(err.Error(), "bcrypt_pbkdf") && passphrase == "" {
-				return nil, fmt.Errorf("SSH key appears to be encrypted but no passphrase provided. Add 'ssh_key_password' to your config")
-			}
-			return nil, fmt.Errorf("failed to parse SSH key: %v", err)
+				if strings.Contains(err.Error(), "bcrypt_pbkdf") && passphrase == "" {
+						return nil, fmt.Errorf("SSH key appears to be encrypted but no passphrase provided. Add 'ssh_key_password' to your config")
+				}
+				return nil, fmt.Errorf("failed to parse SSH key: %v", err)
 		}
+
+		// Disable host key checking
+		publicKey.HostKeyCallback = gossh.InsecureIgnoreHostKey()
 
 		return publicKey, nil
 

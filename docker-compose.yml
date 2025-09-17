@@ -9,11 +9,10 @@ services:
       - TZ=CET
       - PUID=1001
       - PGID=1001
-      - SSH_KNOWN_HOSTS=/home/gituser/.ssh/known_hosts
     env_file:
       - .env # Load secrets from .env file
     volumes:
-      - ./test.yaml:/config/config.yaml:ro
+      - ./config.yaml:/config/config.yaml:ro
       - ./ssh-keys:/app/ssh-keys:ro
       - ./backup:/backup:rw
       - ./gitconfig:/home/gituser/.gitconfig:ro

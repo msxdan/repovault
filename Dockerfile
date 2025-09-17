@@ -35,7 +35,7 @@ RUN addgroup -g 1001 -S gituser && \
     adduser -u 1001 -S gituser -G gituser
 
 # Create necessary directories
-RUN mkdir -p /app /backup/repos /config /ssh && \
+RUN mkdir -p /app /backup /config /ssh && \
     chown -R gituser:gituser /app /backup /config /ssh
 
 # Copy binary from builder stage
@@ -67,4 +67,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD pgrep repovault || exit 1
 
 # Default command
-ENTRYPOINT ["/app/repovault", "/config/config.yaml", "/backup/repos"]
+ENTRYPOINT ["/app/repovault", "/config/config.yaml", "/backup"]
