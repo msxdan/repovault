@@ -145,6 +145,9 @@ repositories:
 > [!WARNING]
 > Use \* in branches with caution, backing up too many branches could take forever and reach update period before finish initial sync
 
+> [!NOTE]
+> I would recommend setting minimum update period at least `5m`
+
 ## 🔐 Authentication Methods
 
 ### SSH Key Authentication
