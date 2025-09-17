@@ -21,7 +21,7 @@ COPY src/main.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o repovault main.go
 
 # Final stage - minimal image
-FROM alpine:3.18
+FROM alpine:3.22
 
 # Install git, openssh (for SSH keys), and ca-certificates
 RUN apk add --no-cache \
