@@ -16,7 +16,6 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -35,18 +34,25 @@ const (
 )
 
 type Config struct {
+	Defaults     Defaults     `yaml:"defaults,omitempty"`
 	Repositories []Repository `yaml:"repositories"`
 }
 
+type Defaults struct {
+	Period          string `yaml:"period,omitempty"`
+	BackupRetention int    `yaml:"backup_retention,omitempty"` // Number of backups to keep per branch
+	LogLevel        string `yaml:"log_level,omitempty"`        // "verbose", "normal", "quiet"
+}
+
 type Repository struct {
-	Name                   string   `yaml:"name"`
-	URL                    string   `yaml:"url"`
-	Branches               []string `yaml:"branches"`
-	Path                   string   `yaml:"path,omitempty"` // Optional, defaults to name
-	Period                 string   `yaml:"period"`
-	Auth                   Auth     `yaml:"auth"`
-	ForcePushProtection    string   `yaml:"force_push_protection,omitempty"`    // "skip", "backup_and_sync", "sync_anyway"
-	ProtectDefaultBranch   string   `yaml:"protect_default_branch,omitempty"`   // Override for default branch only
+	Name            string   `yaml:"name"`
+	URL             string   `yaml:"url"`
+	Branches        []string `yaml:"branches"`
+	Path            string   `yaml:"path,omitempty"`            // Optional, defaults to name
+	Period          string   `yaml:"period,omitempty"`          // Optional, defaults to global period
+	BackupRetention int      `yaml:"backup_retention,omitempty"` // Number of backups to keep per branch (overrides default)
+	LogLevel        string   `yaml:"log_level,omitempty"`        // Override log level for this repo
+	Auth            Auth     `yaml:"auth"`
 }
 
 type Auth struct {
@@ -65,6 +71,13 @@ type RepoVault struct {
 	baseDir    string
 	logger     *log.Logger
 	useColors  bool
+}
+
+type branchSyncResult struct {
+	err           error
+	isNewBranch   bool
+	backupCreated bool
+	backupRef     string
 }
 
 func NewRepoVault(configPath, baseDir string) (*RepoVault, error) {
@@ -164,12 +177,29 @@ func (rv *RepoVault) Start() {
 
 func (rv *RepoVault) syncRepository(repo Repository) {
 	defer rv.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			rv.logError("%s: Goroutine panic recovered: %v", repo.Name, r)
+		}
+	}()
 
-	period, err := time.ParseDuration(repo.Period)
-	if err != nil {
-		rv.logError("%s: Invalid period '%s': %v", repo.Name, repo.Period, err)
+	// Get period (repo-specific or default)
+	periodStr := repo.Period
+	if periodStr == "" {
+		periodStr = rv.config.Defaults.Period
+	}
+	if periodStr == "" {
+		rv.logError("%s: No period configured (set in defaults or per-repository)", repo.Name)
 		return
 	}
+
+	period, err := time.ParseDuration(periodStr)
+	if err != nil {
+		rv.logError("%s: Invalid period '%s': %v", repo.Name, periodStr, err)
+		return
+	}
+
+	repoID := rv.extractRepoIdentifier(repo.URL)
 
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
@@ -180,8 +210,10 @@ func (rv *RepoVault) syncRepository(repo Repository) {
 	for {
 		select {
 		case <-rv.ctx.Done():
+			rv.logInfo("%s: Received shutdown signal, stopping sync loop", repoID)
 			return
-		case <-ticker.C:
+		case t := <-ticker.C:
+			rv.logInfo("%s: Ticker fired at %s (period: %s)", repoID, t.Format("15:04:05"), period)
 			rv.performSync(repo, period)
 		}
 	}
@@ -235,66 +267,109 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
 
 	// Sync branches
 	branches := repo.Branches
-	var defaultBranch string
+
+	// Get log level (repo-specific or default)
+	logLevel := repo.LogLevel
+	if logLevel == "" {
+		logLevel = rv.config.Defaults.LogLevel
+	}
+	if logLevel == "" {
+		logLevel = "normal" // Default to normal
+	}
 
 	if len(branches) == 1 && branches[0] == "*" {
-		rv.logInfo("%s: Discovering remote branches...", repoID)
 		branches, err = rv.getAllRemoteBranches(gitRepo, auth)
 		if err != nil {
 			rv.logError("%s: Failed to get remote branches: %v", repoID, err)
 			return
-		}
-		rv.logInfo("%s: Found %d remote branches: %v", repoID, len(branches), branches)
-	}
-
-	// Detect default branch if we need it for protection
-	if repo.ProtectDefaultBranch != "" {
-		defaultBranch, err = rv.getDefaultBranch(gitRepo, branches)
-		if err != nil {
-			rv.logWarn("%s: Could not detect default branch: %v", repoID, err)
-		} else {
-			rv.logInfo("%s: Default branch detected: %s", repoID, defaultBranch)
 		}
 	}
 
 	successCount := 0
 	totalBranches := len(branches)
 
+	// Get backup retention setting (repo-specific or default)
+	backupRetention := repo.BackupRetention
+	if backupRetention == 0 {
+		backupRetention = rv.config.Defaults.BackupRetention
+	}
+
+	// Start syncing message
+	if logLevel != "quiet" {
+		rv.logInfo("%s: Syncing %d branches...", repoID, totalBranches)
+	}
+
 	for i, branch := range branches {
 		branchStartTime := time.Now()
 
-		// Determine force push protection for this branch
-		forcePushProtection := repo.ForcePushProtection
-		if forcePushProtection == "" {
-			forcePushProtection = "sync_anyway" // Default
-		}
-
-		// Override for default branch if specified
-		if repo.ProtectDefaultBranch != "" && branch == defaultBranch {
-			forcePushProtection = repo.ProtectDefaultBranch
-			rv.logInfo("%s/%s: Using default branch protection: %s", repoID, branch, forcePushProtection)
-		}
-
-		// Show progress for branches that might take a while
+		// Show progress for branches that might take a while (only in verbose mode)
 		branchDone := make(chan bool, 1)
-		go rv.showBranchProgress(repoID, branch, i+1, totalBranches, branchDone)
+		if logLevel == "verbose" {
+			go rv.showBranchProgress(repoID, branch, i+1, totalBranches, branchDone)
+		}
 
-		if err := rv.syncBranch(gitRepo, repoID, branch, auth, forcePushProtection); err != nil {
+		branchResult := rv.syncBranch(gitRepo, repoID, branch, auth, backupRetention, logLevel)
+
+		if logLevel == "verbose" {
 			branchDone <- true
-			duration := time.Since(branchStartTime)
-			rv.logError("%s/%s %s (%.1fs)",
+		}
+
+		duration := time.Since(branchStartTime)
+
+		if branchResult.err != nil {
+			// Always log errors regardless of log level
+			rv.logError("%s: Branch '%s' failed %s (%.1fs)",
 				repoID, branch,
 				rv.colorize(ColorRed, "✗"),
 				duration.Seconds())
-			rv.logError("%s/%s: %v", repoID, branch, err)
+			rv.logError("%s: Branch '%s' error: %v", repoID, branch, branchResult.err)
 		} else {
-			branchDone <- true
-			duration := time.Since(branchStartTime)
-			rv.logSuccess("%s/%s %s (%.1fs)",
-				repoID, branch,
-				rv.colorize(ColorGreen, "✓"),
-				duration.Seconds())
 			successCount++
+
+			// Only log individual successes in verbose mode
+			if logLevel == "verbose" {
+				if branchResult.isNewBranch {
+					rv.logInfo("%s/%s: Created local branch tracking remote", repoID, branch)
+				}
+				if branchResult.backupCreated {
+					rv.logInfo("%s/%s: Backed up to %s", repoID, branch, branchResult.backupRef)
+				}
+				rv.logSuccess("%s/%s %s (%.1fs)",
+					repoID, branch,
+					rv.colorize(ColorGreen, "✓"),
+					duration.Seconds())
+			}
+
+			// Show progress updates in normal mode (every 20% or every 10 branches)
+			if logLevel == "normal" {
+				progressInterval := totalBranches / 5
+				if progressInterval < 10 {
+					progressInterval = 10
+				}
+				if (i+1)%progressInterval == 0 || i+1 == totalBranches {
+					rv.logInfo("%s: %d/%d", repoID, i+1, totalBranches)
+				}
+			}
+		}
+	}
+
+	// After syncing all branches, checkout to default branch
+	defaultBranch := rv.getDefaultBranch(gitRepo, branches)
+	if defaultBranch != "" {
+		worktree, err := gitRepo.Worktree()
+		if err == nil {
+			head, err := gitRepo.Head()
+			if err == nil {
+				currentBranch := head.Name().Short()
+				if currentBranch != defaultBranch {
+					localBranchRef := plumbing.NewBranchReferenceName(defaultBranch)
+					if err := worktree.Checkout(&git.CheckoutOptions{Branch: localBranchRef, Force: true}); err == nil {
+						if logLevel == "verbose" {
+							rv.logInfo("%s: Checked out to default branch '%s'", repoID, defaultBranch)
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -302,16 +377,20 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
 	nextSync := time.Now().Add(period).Format("15:04:05")
 
 	// Calculate repository size
-	rv.logInfo("%s: Calculating repository size...", repoID)
+	if logLevel == "verbose" {
+		rv.logInfo("%s: Calculating repository size...", repoID)
+	}
 	repoSize := rv.calculateRepoSize(repoPath)
 	sizeStr := rv.formatBytes(repoSize)
 
-	if successCount == totalBranches {
-		rv.logInfo("%s: All %d branches synced (%.1fs, %s, next: %s)",
-			repoID, successCount, totalDuration.Seconds(), sizeStr, nextSync)
-	} else {
-		rv.logWarn("%s: %d/%d branches synced (%.1fs, %s, next: %s)",
-			repoID, successCount, totalBranches, totalDuration.Seconds(), sizeStr, nextSync)
+	if logLevel != "quiet" {
+		if successCount == totalBranches {
+			rv.logInfo("%s: Synced %d branches (%.1fs, %s, next: %s)",
+				repoID, successCount, totalDuration.Seconds(), sizeStr, nextSync)
+		} else {
+			rv.logWarn("%s: Synced %d/%d branches (%.1fs, %s, next: %s)",
+				repoID, successCount, totalBranches, totalDuration.Seconds(), sizeStr, nextSync)
+		}
 	}
 }
 
@@ -346,10 +425,12 @@ func (rv *RepoVault) getAllRemoteBranches(repo *git.Repository, auth transport.A
 	return branches, nil
 }
 
-func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string, auth transport.AuthMethod, forcePushProtection string) error {
+func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string, auth transport.AuthMethod, backupRetention int, logLevel string) branchSyncResult {
+	result := branchSyncResult{}
 	worktree, err := repo.Worktree()
 	if err != nil {
-		return err
+		result.err = err
+		return result
 	}
 
 	// Fetch all refs first
@@ -378,7 +459,8 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 	remoteBranchRef := plumbing.NewRemoteReferenceName("origin", branchName)
 	remoteRef, err := repo.Reference(remoteBranchRef, true)
 	if err != nil {
-		return fmt.Errorf("remote branch not found")
+		result.err = fmt.Errorf("remote branch not found")
+		return result
 	}
 
 	if localRef == nil {
@@ -386,26 +468,35 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 		newRef := plumbing.NewHashReference(localBranchRef, remoteRef.Hash())
 		err = repo.Storer.SetReference(newRef)
 		if err != nil {
-			return fmt.Errorf("failed to create local branch")
+			result.err = fmt.Errorf("failed to create local branch")
+			return result
 		}
-		rv.logInfo("%s/%s: Created local branch tracking remote", repoID, branchName)
+		result.isNewBranch = true
 	} else {
-		// Check for force push before syncing
+		// Create backup before syncing if local is different from remote
 		localHash := localRef.Hash()
 		remoteHash := remoteRef.Hash()
 
-		if localHash != remoteHash {
-			forcePushDetected, err := rv.detectForcePush(repo, localHash, remoteHash)
+		if localHash != remoteHash && backupRetention > 0 {
+			// Create backup reference before syncing
+			backupRefName := fmt.Sprintf("refs/backups/%s/%s",
+				time.Now().Format("2006-01-02-15-04-05"), branchName)
+
+			backupRef := plumbing.NewHashReference(plumbing.ReferenceName(backupRefName), localHash)
+			err := repo.Storer.SetReference(backupRef)
 			if err != nil {
-				rv.logWarn("%s/%s: Could not detect force push: %v", repoID, branchName, err)
-			} else if forcePushDetected {
-				handled, err := rv.handleForcePush(repo, repoID, branchName, localRef, remoteRef, forcePushProtection)
-				if err != nil {
-					return fmt.Errorf("failed to handle force push: %v", err)
+				if logLevel == "verbose" {
+					rv.logWarn("%s/%s: Failed to create backup reference: %v", repoID, branchName, err)
 				}
-				if !handled {
-					rv.logWarn("%s/%s: Skipping sync due to force push protection", repoID, branchName)
-					return nil // Skip this branch
+			} else {
+				result.backupCreated = true
+				result.backupRef = backupRefName
+
+				// Clean up old backups
+				if err := rv.cleanupOldBackups(repo, repoID, branchName, backupRetention, logLevel); err != nil {
+					if logLevel == "verbose" {
+						rv.logWarn("%s/%s: Failed to cleanup old backups: %v", repoID, branchName, err)
+					}
 				}
 			}
 		}
@@ -414,7 +505,8 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 	// Get current branch to avoid unnecessary checkouts
 	head, err := repo.Head()
 	if err != nil {
-		return fmt.Errorf("failed to get HEAD")
+		result.err = fmt.Errorf("failed to get HEAD")
+		return result
 	}
 
 	currentBranch := head.Name().Short()
@@ -426,7 +518,8 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 			// Evaluate status only if checkout failed
 			status, sErr := worktree.Status()
 			if sErr != nil {
-				return fmt.Errorf("failed to checkout branch (%v) and get status (%v)", err, sErr)
+				result.err = fmt.Errorf("failed to checkout branch (%v) and get status (%v)", err, sErr)
+				return result
 			}
 			if hasBlockingChanges(status) {
 				var dirtyDetails []string
@@ -438,16 +531,21 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 						dirtyDetails = append(dirtyDetails, fmt.Sprintf("%s (%s/%s)", path, statusCodeString(st.Staging), statusCodeString(st.Worktree)))
 					}
 				}
-				rv.logWarn("%s/%s: Reset dirty working directory (blocking checkout)", repoID, branchName)
+				if logLevel == "verbose" {
+					rv.logWarn("%s/%s: Reset dirty working directory (blocking checkout)", repoID, branchName)
+				}
 				if rErr := worktree.Reset(&git.ResetOptions{Commit: head.Hash(), Mode: git.HardReset}); rErr != nil {
-					return fmt.Errorf("failed to reset working directory: %v", rErr)
+					result.err = fmt.Errorf("failed to reset working directory: %v", rErr)
+					return result
 				}
 				if cErr := worktree.Checkout(&git.CheckoutOptions{Branch: localBranchRef, Force: true}); cErr != nil {
-					return fmt.Errorf("failed to checkout branch after reset: %v", cErr)
+					result.err = fmt.Errorf("failed to checkout branch after reset: %v", cErr)
+					return result
 				}
 			} else {
 				// If there are no blocking tracked changes, propagate original checkout error
-				return fmt.Errorf("failed to checkout branch: %v", err)
+				result.err = fmt.Errorf("failed to checkout branch: %v", err)
+				return result
 			}
 		}
 	}
@@ -456,7 +554,7 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 	localRef, _ = repo.Reference(localBranchRef, true)
 	if localRef != nil && localRef.Hash() == remoteRef.Hash() {
 		// Already up to date
-		return nil
+		return result
 	}
 
 	// Reset local branch to match remote (force sync)
@@ -465,10 +563,11 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 		Mode:   git.HardReset,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to reset to remote")
+		result.err = fmt.Errorf("failed to reset to remote")
+		return result
 	}
 
-	return nil
+	return result
 }
 
 func expandEnvVars(s string) string {
@@ -546,148 +645,96 @@ func isatty() bool {
 	return false
 }
 
-// Detect if a force push occurred by checking if local commits are reachable from remote
-func (rv *RepoVault) detectForcePush(repo *git.Repository, localHash, remoteHash plumbing.Hash) (bool, error) {
-	// If hashes are the same, no update needed
-	if localHash == remoteHash {
-		return false, nil
-	}
-
-	// Check if local commit is an ancestor of remote commit (normal forward update)
-	isAncestor, err := rv.isAncestor(repo, localHash, remoteHash)
-	if err != nil {
-		return false, err
-	}
-
-	// If local is NOT an ancestor of remote, it's likely a force push
-	return !isAncestor, nil
-}
-
-// Check if commit A is an ancestor of commit B
-func (rv *RepoVault) isAncestor(repo *git.Repository, ancestorHash, descendantHash plumbing.Hash) (bool, error) {
-	// Get the descendant commit
-	descendantCommit, err := repo.CommitObject(descendantHash)
-	if err != nil {
-		return false, err
-	}
-
-	// Walk through commit history to find ancestor
-	iter := descendantCommit.Parents()
-	defer iter.Close()
-
-	// Check if ancestor is in the parent chain
-	visited := make(map[plumbing.Hash]bool)
-	queue := []plumbing.Hash{descendantHash}
-
-	for len(queue) > 0 {
-		currentHash := queue[0]
-		queue = queue[1:]
-
-		if visited[currentHash] {
-			continue
-		}
-		visited[currentHash] = true
-
-		if currentHash == ancestorHash {
-			return true, nil
-		}
-
-		commit, err := repo.CommitObject(currentHash)
-		if err != nil {
-			continue // Skip if we can't get the commit
-		}
-
-		// Add parents to queue
-		iter := commit.Parents()
-		err = iter.ForEach(func(parent *object.Commit) error {
-			if !visited[parent.Hash] {
-				queue = append(queue, parent.Hash)
-			}
-			return nil
-		})
-		if err != nil {
-			continue
-		}
-	}
-
-	return false, nil
-}
-
-// Handle force push according to protection policy
-func (rv *RepoVault) handleForcePush(repo *git.Repository, repoID, branchName string, localRef, remoteRef *plumbing.Reference, protection string) (bool, error) {
-	localHash := localRef.Hash()
-	remoteHash := remoteRef.Hash()
-
-	rv.logWarn("%s/%s: %s Force push detected! Remote history changed",
-		repoID, branchName, rv.colorize(ColorRed, "⚠"))
-	rv.logWarn("%s/%s: Local: %s, Remote: %s",
-		repoID, branchName, localHash.String()[:8], remoteHash.String()[:8])
-
-	switch protection {
-	case "skip":
-		rv.logWarn("%s/%s: Skipping sync to preserve local history", repoID, branchName)
-		return false, nil
-
-	case "backup_and_sync":
-		// Create backup reference before syncing
-		backupRefName := fmt.Sprintf("refs/backups/%s/%s",
-			time.Now().Format("2006-01-02-15-04-05"), branchName)
-
-		backupRef := plumbing.NewHashReference(plumbing.ReferenceName(backupRefName), localHash)
-		err := repo.Storer.SetReference(backupRef)
-		if err != nil {
-			rv.logError("%s/%s: Failed to create backup reference: %v", repoID, branchName, err)
-			return false, err
-		}
-
-		rv.logInfo("%s/%s: %s Backed up old commits to %s",
-			repoID, branchName, rv.colorize(ColorGreen, "✓"), backupRefName)
-		rv.logWarn("%s/%s: Proceeding with sync (old commits preserved in backup)", repoID, branchName)
-		return true, nil
-
-	case "sync_anyway":
-		rv.logWarn("%s/%s: Syncing anyway (local commits will be lost)", repoID, branchName)
-		return true, nil
-
-	default:
-		rv.logWarn("%s/%s: Unknown force push protection '%s', defaulting to sync_anyway",
-			repoID, branchName, protection)
-		return true, nil
-	}
-}
-
-// Get the default branch of the repository
-func (rv *RepoVault) getDefaultBranch(repo *git.Repository, availableBranches []string) (string, error) {
-	// First, try to get the HEAD reference which points to the default branch
-	headRef, err := repo.Head()
-	if err == nil {
-		if headRef.Name().IsBranch() {
-			defaultBranch := headRef.Name().Short()
-			// Verify this branch is in our available branches list
-			for _, branch := range availableBranches {
-				if branch == defaultBranch {
-					return defaultBranch, nil
-				}
-			}
-		}
-	}
-
-	// Fallback: try common default branch names in order of preference
+// getDefaultBranch tries to determine the default branch of the repository
+func (rv *RepoVault) getDefaultBranch(repo *git.Repository, availableBranches []string) string {
+	// Try common default branch names in order of preference
 	commonDefaults := []string{"main", "master", "develop", "dev"}
 	for _, defaultCandidate := range commonDefaults {
 		for _, branch := range availableBranches {
 			if branch == defaultCandidate {
-				return defaultCandidate, nil
+				return defaultCandidate
 			}
 		}
 	}
 
 	// Last resort: return the first branch if any exist
 	if len(availableBranches) > 0 {
-		return availableBranches[0], nil
+		return availableBranches[0]
 	}
 
-	return "", fmt.Errorf("no branches found")
+	return ""
+}
+
+// cleanupOldBackups removes old backups keeping only the most recent N backups per branch
+func (rv *RepoVault) cleanupOldBackups(repo *git.Repository, repoID, branchName string, keepCount int, logLevel string) error {
+	if keepCount <= 0 {
+		return nil // No cleanup needed if retention is 0 or negative
+	}
+
+	// Get all backup references for this branch
+	refs, err := repo.References()
+	if err != nil {
+		return err
+	}
+
+	// Collect backup refs for this specific branch
+	type backupRef struct {
+		ref  *plumbing.Reference
+		time time.Time
+	}
+	var backups []backupRef
+
+	backupPrefix := "refs/backups/"
+	err = refs.ForEach(func(ref *plumbing.Reference) error {
+		refName := ref.Name().String()
+
+		// Check if this is a backup ref for our branch
+		if strings.HasPrefix(refName, backupPrefix) && strings.HasSuffix(refName, "/"+branchName) {
+			// Extract timestamp from ref name (format: refs/backups/2006-01-02-15-04-05/branchName)
+			parts := strings.Split(refName, "/")
+			if len(parts) >= 4 {
+				timestampStr := parts[2]
+				timestamp, err := time.Parse("2006-01-02-15-04-05", timestampStr)
+				if err == nil {
+					backups = append(backups, backupRef{ref: ref, time: timestamp})
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// If we have more backups than we want to keep, delete the oldest ones
+	if len(backups) > keepCount {
+		// Sort by timestamp (newest first)
+		for i := 0; i < len(backups)-1; i++ {
+			for j := i + 1; j < len(backups); j++ {
+				if backups[i].time.Before(backups[j].time) {
+					backups[i], backups[j] = backups[j], backups[i]
+				}
+			}
+		}
+
+		// Delete old backups (keep only the first keepCount)
+		for i := keepCount; i < len(backups); i++ {
+			err := repo.Storer.RemoveReference(backups[i].ref.Name())
+			if err != nil {
+				if logLevel == "verbose" {
+					rv.logWarn("%s/%s: Failed to remove old backup %s: %v",
+						repoID, branchName, backups[i].ref.Name().String(), err)
+				}
+			} else {
+				if logLevel == "verbose" {
+					rv.logInfo("%s/%s: Removed old backup %s",
+						repoID, branchName, backups[i].ref.Name().Short())
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // Show progress for long-running operations

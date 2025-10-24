@@ -1,17 +1,14 @@
 # config.yaml
 defaults:
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
+  period: "3h"
+  backup_retention: 5 # Keep last 5 backups per branch
+  log_level: "normal" # Options: "verbose" (all branch logs), "normal" (progress updates), "quiet" (errors only)
 
 repositories:
 - name: "dotfiles"
   url: "https://github.com/msxdan/dotfiles.git"
   branches: [ "*" ]
   path: "dotfiles"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "http"
     username: "msxdan"
@@ -21,9 +18,6 @@ repositories:
   url: "https://github.com/msxdan/dotfiles_private.git"
   branches: [ "main" ]
   path: "dotfiles_private"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "http"
     username: "msxdan"
@@ -33,9 +27,6 @@ repositories:
   url: "https://github.com/msxdan/homelab-private.git"
   branches: [ "*" ]
   path: "homelab-private"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "http"
     username: "msxdan"
@@ -45,9 +36,6 @@ repositories:
   url: "https://github.com/msxdan/zet.git"
   branches: [ "master" ]
   path: "zet"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "http"
     username: "msxdan"
@@ -57,9 +45,6 @@ repositories:
   url: "https://github.com/msxdan/marvincloud.io.git"
   branches: [ "main" ]
   path: "marvincloud.io"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "http"
     username: "msxdan"
@@ -67,11 +52,8 @@ repositories:
 
 - name: "mm-ongres"
   url: "git@gitlab.ongres.com:ongresportal/mm-energia/mm-energia.git"
-  branches: [ "master" ]
+  branches: [ "*" ]
   path: "mm-ongres"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "ssh"
     ssh_key_path: "ssh-keys/gitlab_ongres_com_ed25519"
@@ -81,9 +63,6 @@ repositories:
   url: "git@github.com:masmovil/infrastructure.git"
   branches: [ "master" ]
   path: "infrastructure"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "ssh"
     ssh_key_path: "ssh-keys/github_com_ed25519"
@@ -92,9 +71,6 @@ repositories:
 - name: "kubernetes-clusters"
   url: "git@github.com:masmovil/kubernetes-clusters.git"
   branches: [ "master" ]
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
   auth:
     type: "ssh"
     ssh_key_path: "ssh-keys/github_com_ed25519"
@@ -102,10 +78,7 @@ repositories:
 
 - name: "insurance"
   url: "git@github.com:masmovil/insurance.git"
-  branches: [ "master", "main", "frontend-dev" ]
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
+  branches: [ "master", "frontend-dev" ]
   auth:
     type: "ssh"
     ssh_key_path: "ssh-keys/github_com_ed25519"
@@ -115,9 +88,14 @@ repositories:
   url: "git@github.com:luceraenergia/lucera-infra.git"
   branches: [ "*" ]
   path: "lucera-infra"
-  period: "6h"
-  force_push_protection: "sync_anyway" # Allow force push on feature branches
-  protect_default_branch: "backup_and_sync" # But protect main/master branch
+  auth:
+    type: "ssh"
+    ssh_key_path: "ssh-keys/github_com_ed25519"
+    ssh_key_password: $REPOVAULT_SSH_KEY_PASSWORD
+
+- name: "masmovil-dns"
+  url: "git@github.com:masmovil/masmovil-dns.git"
+  branches: [ "master" ]
   auth:
     type: "ssh"
     ssh_key_path: "ssh-keys/github_com_ed25519"
