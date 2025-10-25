@@ -167,27 +167,6 @@ auth:
   type: "none"
 ```
 
-## Example Output
-
-```shell
-22:13:59 INFO  Starting RepoVault with 5 repositories
-22:13:59 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
-22:13:59 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
-22:13:59 INFO  github.com/msxdan/zet: Syncing 1 branches...
-22:14:00 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
-22:14:00 INFO  github.com/msxdan/marvincloud.io: 1/1
-22:14:00 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
-22:14:00 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (0.5s, 9.2 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/dotfiles_private: 1/1
-22:14:00 INFO  github.com/msxdan/zet: 1/1
-22:14:00 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (0.5s, 1.7 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/zet: Synced 1 branches (0.5s, 201.3 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/dotfiles: 2/2
-22:14:00 INFO  github.com/msxdan/dotfiles: Synced 2 branches (0.9s, 2.8 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/homelab-private: 2/2
-22:14:00 INFO  github.com/msxdan/homelab-private: Synced 2 branches (1.0s, 1.7 MB, next: 22:44:00)
-```
-
 ## Automatic Backups
 
 RepoVault automatically creates backups before syncing when the local branch differs from remote. This protects against data loss from force pushes.
@@ -253,14 +232,25 @@ Example: If your last sync was 7 hours ago and your period is 3 hours, RepoVault
 23:40:29 INFO  github.com/username/my-app: Missed sync detected (last sync: 7h ago), performing catch-up sync
 ```
 
-## Output Example
+## Example Output
 
-```
-15:04:32 INFO  Starting RepoVault with 4 repositories
-15:04:32 INFO  github.com/username/my-app: Cloning repository...
-15:04:35 INFO  github.com/username/my-app: Syncing 2 branches...
-15:04:35 INFO  github.com/username/my-app: 2/2
-15:04:35 INFO  github.com/username/my-app: Synced 2 branches (3.4s, 42.3 MB, next: 15:09)
+```shell
+22:13:59 INFO  Starting RepoVault with 5 repositories
+22:13:59 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
+22:13:59 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
+22:13:59 INFO  github.com/msxdan/zet: Syncing 1 branches...
+22:14:00 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
+22:14:00 INFO  github.com/msxdan/marvincloud.io: 1/1
+22:14:00 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
+22:14:00 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (0.5s, 9.2 MB, next: 22:44:00)
+22:14:00 INFO  github.com/msxdan/dotfiles_private: 1/1
+22:14:00 INFO  github.com/msxdan/zet: 1/1
+22:14:00 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (0.5s, 1.7 MB, next: 22:44:00)
+22:14:00 INFO  github.com/msxdan/zet: Synced 1 branches (0.5s, 201.3 MB, next: 22:44:00)
+22:14:00 INFO  github.com/msxdan/dotfiles: 2/2
+22:14:00 INFO  github.com/msxdan/dotfiles: Synced 2 branches (0.9s, 2.8 MB, next: 22:44:00)
+22:14:00 INFO  github.com/msxdan/homelab-private: 2/2
+22:14:00 INFO  github.com/msxdan/homelab-private: Synced 2 branches (1.0s, 1.7 MB, next: 22:44:00)
 ```
 
 ## Docker Deployment
