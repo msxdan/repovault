@@ -14,6 +14,7 @@ A simple, lightweight Git repository synchronization tool that automatically bac
 ## ✨ Features
 
 - **🔄 Automatic Synchronization** - Configurable sync intervals (e.g., `5m`, `1h`, `30s`)
+- **⏱️ Missed Sync Recovery** - Automatically detects and performs catch-up syncs after system restarts or downtime
 - **🌟 Wildcard Branch Support** - Sync specific branches or use `*` to sync all branches
 - **🔐 Multiple Authentication Methods** - SSH keys, HTTP (username/password), and public repositories
 - **🏢 Multi-Provider Support** - GitHub, GitLab, Bitbucket, and self-hosted Git servers
@@ -299,6 +300,63 @@ backup/
     └── tools/
 ```
 
+## ⏱️ Missed Sync Recovery
+
+RepoVault automatically handles missed syncs when your computer is off or the service is stopped. Here's how it works:
+
+### How It Works
+
+1. **State Tracking**: RepoVault maintains a state file (`.repovault-state.json`) in your backup directory that tracks the last successful sync time for each repository.
+
+2. **Startup Check**: When RepoVault starts, it checks if any repositories missed their scheduled sync:
+   - Compares the last sync time + configured period with the current time
+   - If the scheduled sync time has passed, performs a catch-up sync immediately
+
+3. **Automatic Recovery**: After catch-up syncs complete, normal periodic syncing resumes.
+
+### Example Scenario
+
+```yaml
+repositories:
+  - name: "my-app"
+    url: "https://github.com/username/my-app.git"
+    period: "3h"  # Sync every 3 hours
+```
+
+**Timeline:**
+- 16:12 - Last sync completed successfully
+- 19:12 - Scheduled sync time (computer was off, sync missed)
+- 22:12 - Another scheduled sync missed
+- 23:40 - Computer turned back on, RepoVault starts
+- 23:40 - Detects missed sync (last sync was 7h28m ago)
+- 23:40 - Performs immediate catch-up sync
+- 02:40 - Resumes normal 3-hour sync cycle
+
+### Viewing Missed Sync Logs
+
+When a missed sync is detected, you'll see:
+
+```
+23:40:29 INFO  github.com/username/my-app: Missed sync detected (last sync: 7h ago), performing catch-up sync
+23:40:29 INFO  github.com/username/my-app: Syncing 2 branches...
+```
+
+### State File Location
+
+The state file is stored at: `<backup-directory>/.repovault-state.json`
+
+**Example:**
+```json
+{
+  "last_syncs": {
+    "github.com/username/my-app": "2025-10-25T16:12:27Z",
+    "gitlab.com/company/api": "2025-10-25T16:11:53Z"
+  }
+}
+```
+
+> **Note**: The state file is automatically created and managed by RepoVault. No manual configuration required!
+
 ## 🔧 Advanced Usage
 
 ### Multiple GitHub Accounts
@@ -343,6 +401,11 @@ repositories:
 3. **Secure your config.yaml** file (contains credentials)
 4. **Use least-privilege tokens** (read-only access)
 5. **Regular token rotation** for enhanced security
+
+GitHub Fine Grained Token
+
+- Contents - read-only
+- Metadata
 
 ## 🐛 Troubleshooting
 
@@ -401,3 +464,11 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ---
 
 **⭐ Star this repo if RepoVault helps you keep your repositories safe!**
+
+# TODO
+
+Reduce memory consuption, with a few repos, it's using 1.772 GiB and not freeing up
+
+- Limit concurrent syncs to avoid memory peaks
+
+Current logs for VERBOSE mode, INFO mode should how show general stats, success, pending and failed

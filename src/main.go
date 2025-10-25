@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -71,6 +72,20 @@ type RepoVault struct {
 	baseDir    string
 	logger     *log.Logger
 	useColors  bool
+	state      *SyncState
+	stateMutex sync.Mutex
+}
+
+// SyncState tracks the last sync time for each repository
+type SyncState struct {
+	LastSyncs map[string]time.Time `json:"last_syncs"`
+}
+
+// newSyncState creates a new SyncState
+func newSyncState() *SyncState {
+	return &SyncState{
+		LastSyncs: make(map[string]time.Time),
+	}
 }
 
 type branchSyncResult struct {
@@ -91,6 +106,13 @@ func NewRepoVault(configPath, baseDir string) (*RepoVault, error) {
 	// Check if colors are supported (simple check for TTY)
 	useColors := isatty()
 
+	// Load or create sync state
+	state, err := loadSyncState(baseDir)
+	if err != nil {
+		// If state file doesn't exist, create a new one
+		state = newSyncState()
+	}
+
 	return &RepoVault{
 		config:    config,
 		ctx:       ctx,
@@ -98,6 +120,7 @@ func NewRepoVault(configPath, baseDir string) (*RepoVault, error) {
 		baseDir:   baseDir,
 		logger:    log.New(os.Stdout, "", 0), // No prefix, we'll handle our own
 		useColors: useColors,
+		state:     state,
 	}, nil
 }
 
@@ -111,6 +134,74 @@ func loadConfig(configPath string) (Config, error) {
 
 	err = yaml.Unmarshal(data, &config)
 	return config, err
+}
+
+// getStateFilePath returns the path to the state file
+func getStateFilePath(baseDir string) string {
+	return filepath.Join(baseDir, ".repovault-state.json")
+}
+
+// loadSyncState loads the sync state from disk
+func loadSyncState(baseDir string) (*SyncState, error) {
+	stateFile := getStateFilePath(baseDir)
+
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var state SyncState
+	err = json.Unmarshal(data, &state)
+	if err != nil {
+		return nil, err
+	}
+
+	return &state, nil
+}
+
+// saveSyncState saves the sync state to disk
+func (rv *RepoVault) saveSyncState() error {
+	rv.stateMutex.Lock()
+	defer rv.stateMutex.Unlock()
+
+	stateFile := getStateFilePath(rv.baseDir)
+
+	data, err := json.MarshalIndent(rv.state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(stateFile, data, 0644)
+}
+
+// updateLastSync updates the last sync time for a repository
+func (rv *RepoVault) updateLastSync(repoID string) {
+	rv.stateMutex.Lock()
+	rv.state.LastSyncs[repoID] = time.Now()
+	rv.stateMutex.Unlock()
+
+	// Save state asynchronously to avoid blocking
+	go func() {
+		if err := rv.saveSyncState(); err != nil {
+			rv.logWarn("Failed to save sync state: %v", err)
+		}
+	}()
+}
+
+// shouldPerformCatchupSync checks if a catchup sync is needed
+func (rv *RepoVault) shouldPerformCatchupSync(repoID string, period time.Duration) bool {
+	rv.stateMutex.Lock()
+	defer rv.stateMutex.Unlock()
+
+	lastSync, exists := rv.state.LastSyncs[repoID]
+	if !exists {
+		// Never synced before, no catchup needed (will do initial sync)
+		return false
+	}
+
+	// Check if we're past the next scheduled sync time
+	nextScheduledSync := lastSync.Add(period)
+	return time.Now().After(nextScheduledSync)
 }
 
 func (rv *RepoVault) colorize(color, text string) string {
@@ -201,11 +292,23 @@ func (rv *RepoVault) syncRepository(repo Repository) {
 
 	repoID := rv.extractRepoIdentifier(repo.URL)
 
+	// Check if a catch-up sync is needed
+	if rv.shouldPerformCatchupSync(repoID, period) {
+		rv.stateMutex.Lock()
+		lastSync := rv.state.LastSyncs[repoID]
+		rv.stateMutex.Unlock()
+
+		missedDuration := time.Since(lastSync)
+		rv.logInfo("%s: Missed sync detected (last sync: %s ago), performing catch-up sync",
+			repoID, missedDuration.Round(time.Minute))
+		rv.performSync(repo, period, repoID)
+	} else {
+		// Initial sync (or regular startup if already up-to-date)
+		rv.performSync(repo, period, repoID)
+	}
+
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
-
-	// Initial sync
-	rv.performSync(repo, period)
 
 	for {
 		select {
@@ -214,12 +317,12 @@ func (rv *RepoVault) syncRepository(repo Repository) {
 			return
 		case t := <-ticker.C:
 			rv.logInfo("%s: Ticker fired at %s (period: %s)", repoID, t.Format("15:04:05"), period)
-			rv.performSync(repo, period)
+			rv.performSync(repo, period, repoID)
 		}
 	}
 }
 
-func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
+func (rv *RepoVault) performSync(repo Repository, period time.Duration, repoID string) {
 	startTime := time.Now()
 
 	// Use path if specified, otherwise default to name
@@ -229,9 +332,6 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
 	}
 
 	repoPath := filepath.Join(rv.baseDir, repoLocalPath)
-
-	// Extract repo identifier from URL for better logging
-	repoID := rv.extractRepoIdentifier(repo.URL)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(repoPath), 0755); err != nil {
@@ -392,6 +492,9 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration) {
 				repoID, successCount, totalBranches, totalDuration.Seconds(), sizeStr, nextSync)
 		}
 	}
+
+	// Update last sync time for this repository
+	rv.updateLastSync(repoID)
 }
 
 func (rv *RepoVault) cloneRepository(url, path string, auth transport.AuthMethod) (*git.Repository, error) {
