@@ -3,7 +3,10 @@
   <h1 align="center">RepoVault</h1>
   <p align="center">Automated git repository backup tool</p>
   <p align="center">
-    <a href="https://github.com/msxdan/repovault/releases/latest"><img alt="Release" src="https://img.shields.io/github/release/msxdan/repovault.svg?logo=github&logoColor=white"></a>
+    <a href="https://github.com/msxdan/repovault/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/msxdan/repovault?logo=github"></a>
+  <a href="https://github.com/msxdan/repovault/pkgs/container/repovault"><img alt="Docker"
+  src="https://img.shields.io/badge/ghcr.io-msxdan%2Frepovault-blue?logo=docker"></a>
+  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-amd64%20|%20arm64%20|%20armv7-blue"></a>
   </p>
 </p>
 
