@@ -1,8 +1,7 @@
 # docker-compose.yml
 services:
   repovault:
-    build: .
-    image: repovault:latest
+    image: ghcr.io/msxdan/repovault:latest
     container_name: repovault
     restart: unless-stopped
     environment:
