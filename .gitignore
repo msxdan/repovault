@@ -1,3 +1,4 @@
-backup/**
 .env
+.test
+backup/**
 ssh-keys/**
