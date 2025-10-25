@@ -1,6 +1,13 @@
 # Dockerfile
 # Multi-stage build for smaller final image
-FROM golang:1.25-alpine AS builder
+# Use BUILDPLATFORM to build natively on the host architecture (amd64)
+# This avoids slow QEMU emulation for cross-compilation
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+
+# Docker Buildx automatically provides these ARGs
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 RUN apk add --no-cache upx
 
@@ -19,9 +26,21 @@ RUN go mod download
 # Copy source code
 COPY src/main.go ./
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -a -installsuffix cgo -o repovault main.go
+# Build the application using Go's native cross-compilation
+# This runs natively on amd64, avoiding slow QEMU emulation
+RUN set -ex && \
+    # Map Docker platforms to Go build parameters \
+    case ${TARGETPLATFORM} in \
+        "linux/amd64")  GOARCH=amd64 ;; \
+        "linux/arm64")  GOARCH=arm64 ;; \
+        "linux/arm/v7") GOARCH=arm ;; \
+        *) echo "Unsupported platform: ${TARGETPLATFORM}" && exit 1 ;; \
+    esac && \
+    # Build with explicit GOOS and GOARCH for cross-compilation \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${GOARCH} ${GOARM:+GOARM=${GOARM}} \
+    go build -ldflags "-s -w" -a -installsuffix cgo -o repovault main.go
 
+# Compress the binary (runs natively on build platform)
 RUN upx --best --lzma repovault
 
 # Final stage - minimal image
