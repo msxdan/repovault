@@ -625,15 +625,6 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 				return result
 			}
 			if hasBlockingChanges(status) {
-				var dirtyDetails []string
-				for path, st := range status {
-					if isPureUntracked(st) {
-						continue
-					}
-					if isChange(st) {
-						dirtyDetails = append(dirtyDetails, fmt.Sprintf("%s (%s/%s)", path, statusCodeString(st.Staging), statusCodeString(st.Worktree)))
-					}
-				}
 				if logLevel == "verbose" {
 					rv.logWarn("%s/%s: Reset dirty working directory (blocking checkout)", repoID, branchName)
 				}
@@ -699,7 +690,6 @@ func (rv *RepoVault) getAuth(authConfig Auth) (transport.AuthMethod, error) {
 		// Expand environment variables for SSH key password
 		passphrase := expandEnvVars(authConfig.SSHKeyPassword)
 
-		//publicKey, err := ssh.NewPublicKeys("git", sshKey, passphrase)
 		publicKey, err := ssh.NewPublicKeys("git", sshKey, passphrase)
 		if err != nil {
 				if strings.Contains(err.Error(), "bcrypt_pbkdf") && passphrase == "" {
@@ -941,30 +931,6 @@ func isPureUntracked(s *git.FileStatus) bool { return s.Staging == git.Untracked
 
 // isChange indicates any modification/add/delete/rename for tracked content
 func isChange(s *git.FileStatus) bool { return !isPureUntracked(s) && (s.Staging != git.Unmodified || s.Worktree != git.Unmodified) }
-
-// statusCodeString maps git.StatusCode to a short human string
-func statusCodeString(code git.StatusCode) string {
-	switch code {
-	case git.Unmodified:
-		return "="
-	case git.Untracked:
-		return "?"
-	case git.Added:
-		return "+"
-	case git.Modified:
-		return "M"
-	case git.Deleted:
-		return "D"
-	case git.Renamed:
-		return "R"
-	case git.Copied:
-		return "C"
-	case git.UpdatedButUnmerged:
-		return "U" // merge conflict
-	default:
-		return fmt.Sprintf("%d", code)
-	}
-}
 
 // Extract repository identifier from URL for logging
 // Examples:

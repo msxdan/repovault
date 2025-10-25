@@ -9,7 +9,7 @@ repositories:
   auth:
     type: "http"
     username: "your-username"
-    password: "ghp_your_github_token"
+    password: "$REPOVAULT_GITHUB_TOKEN"
 
 # Repository with all branches (*) and SSH auth
 - name: "api-service"
@@ -20,6 +20,7 @@ repositories:
   auth:
     type: "ssh"
     ssh_key_path: "/root/.ssh/id_rsa"
+    ssh_key_password: "$REPOVAULT_SSH_KEY_PASSWORD"
 
 # Public repository (no auth needed)
 - name: "public-lib"
@@ -39,7 +40,7 @@ repositories:
   auth:
     type: "http"
     username: "deploy-user"
-    password: "glpat_your_gitlab_token"
+    password: "$REPOVAULT_GITLAB_TOKEN"
 
 # Bitbucket repository with SSH
 - name: "legacy-system"
@@ -60,4 +61,4 @@ repositories:
   auth:
     type: "http"
     username: "backup-service"
-    password: "custom_token_here"
+    password: "$REPOVAULT_CUSTOM_TOKEN"

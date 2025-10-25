@@ -2,6 +2,8 @@
 # Multi-stage build for smaller final image
 FROM golang:1.25-alpine AS builder
 
+RUN apk add --no-cache upx
+
 # Install git and ca-certificates (needed for git operations)
 RUN apk add --no-cache git ca-certificates openssh-client
 
@@ -18,7 +20,9 @@ RUN go mod download
 COPY src/main.go ./
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o repovault main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -a -installsuffix cgo -o repovault main.go
+
+RUN upx --best --lzma repovault
 
 # Final stage - minimal image
 FROM alpine:3.18

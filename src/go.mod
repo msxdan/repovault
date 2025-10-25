@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/go-git/go-git/v5 v5.11.0
+	golang.org/x/crypto v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -23,7 +24,6 @@ require (
 	github.com/sergi/go-diff v1.1.0 // indirect
 	github.com/skeema/knownhosts v1.2.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/net v0.19.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect

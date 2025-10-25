@@ -29,19 +29,62 @@ Backs up git repositories on a schedule. Supports GitHub, GitLab, Bitbucket, and
 
 ### Docker (Recommended)
 
+**Supported Architectures:**
+
+- `linux/amd64` - x86-64 (Intel/AMD processors)
+- `linux/arm64` - ARM 64-bit (AWS Graviton, Apple Silicon, Raspberry Pi 4/5)
+- `linux/arm/v7` - ARM 32-bit (Raspberry Pi 3 and older)
+
+**Run using docker:**
+
 ```bash
-git clone https://github.com/msxdan/repovault.git
-cd repovault
-make setup
-nano config.yaml  # Edit your config
-make docker-run
-make logs         # Check status
+# Create your config
+mkdir repovault && cd repovault && mkdir backup
+nano config.yaml  # Create your config (see Configuration section or check config.example.yaml)
+
+# Run with docker-compose
+docker run -d \
+  --name repovault \
+  --restart unless-stopped \
+  -v ./config.yaml:/config/config.yaml:ro \
+  -v ./backup:/backup:rw \
+  ghcr.io/msxdan/repovault:latest
 ```
 
-### Local
+**Run using docker compose:** `docker-compose.yml`:
+
+```yaml
+services:
+  repovault:
+    image: ghcr.io/msxdan/repovault:latest
+    container_name: repovault
+    restart: unless-stopped
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - SSH_KEY_PASSWORD=${SSH_KEY_PASSWORD}
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./ssh-keys:/ssh:ro # If using SSH
+      - ./backup:/backup:rw
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+```
+
+### **Building from source:**
 
 ```bash
-go build -o repovault main.go
+git clone https://github.com/msxdan/repovault.git
+cd repovault/src
+go build -ldflags "-s -w" -a -o repovault main.go
+
+# create a multiline env file (if using auth)
+echo "GITHUB_TOKEN=github_pat_11" > .env
+echo "SSH_KEY_PASSWORD=MyUltraSecretPass" >> .env
+export $(cat .env | xargs)
+
 ./repovault config.yaml /path/to/backup/directory
 ```
 
@@ -251,30 +294,6 @@ Example: If your last sync was 7 hours ago and your period is 3 hours, RepoVault
 22:14:00 INFO  github.com/msxdan/dotfiles: Synced 2 branches (0.9s, 2.8 MB, next: 22:44:00)
 22:14:00 INFO  github.com/msxdan/homelab-private: 2/2
 22:14:00 INFO  github.com/msxdan/homelab-private: Synced 2 branches (1.0s, 1.7 MB, next: 22:44:00)
-```
-
-## Docker Deployment
-
-Example `docker-compose.yml`:
-
-```yaml
-services:
-  repovault:
-    image: repovault:latest
-    container_name: repovault
-    restart: unless-stopped
-    environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - SSH_KEY_PASSWORD=${SSH_KEY_PASSWORD}
-    volumes:
-      - ./config.yaml:/config/config.yaml:ro
-      - ./ssh-keys:/ssh:ro # If using SSH
-      - ./backup:/backup:rw
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "0.5"
 ```
 
 ## Troubleshooting
