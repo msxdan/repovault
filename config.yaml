@@ -1,6 +1,6 @@
 # config.yaml
 defaults:
-  period: "3h"
+  period: "30m"
   backup_retention: 5 # Keep last 5 backups per branch
   log_level: "normal" # Options: "verbose" (all branch logs), "normal" (progress updates), "quiet" (errors only)
 

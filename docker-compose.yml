@@ -15,14 +15,13 @@ services:
       - ./config.yaml:/config/config.yaml:ro
       - ./ssh-keys:/app/ssh-keys:ro
       - ./backup:/backup:rw
-      - ./gitconfig:/home/gituser/.gitconfig:ro
     security_opt:
       - no-new-privileges:true
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: "4"
+          memory: 1G
+          cpus: "2"
         reservations:
           memory: 256M
           cpus: "0.25"
