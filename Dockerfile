@@ -2,7 +2,7 @@
 # Multi-stage build for smaller final image
 # Use BUILDPLATFORM to build natively on the host architecture (amd64)
 # This avoids slow QEMU emulation for cross-compilation
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 # Docker Buildx automatically provides these ARGs
 ARG TARGETPLATFORM
