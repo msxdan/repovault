@@ -281,22 +281,33 @@ Example: If your last sync was 7 hours ago and your period is 3 hours, RepoVault
 ## Example Output
 
 ```shell
-22:13:59 INFO  Starting RepoVault with 5 repositories
-22:13:59 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
-22:13:59 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
-22:13:59 INFO  github.com/msxdan/zet: Syncing 1 branches...
-22:14:00 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
-22:14:00 INFO  github.com/msxdan/marvincloud.io: 1/1
-22:14:00 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
-22:14:00 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (0.5s, 9.2 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/dotfiles_private: 1/1
-22:14:00 INFO  github.com/msxdan/zet: 1/1
-22:14:00 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (0.5s, 1.7 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/zet: Synced 1 branches (0.5s, 201.3 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/dotfiles: 2/2
-22:14:00 INFO  github.com/msxdan/dotfiles: Synced 2 branches (0.9s, 2.8 MB, next: 22:44:00)
-22:14:00 INFO  github.com/msxdan/homelab-private: 2/2
-22:14:00 INFO  github.com/msxdan/homelab-private: Synced 2 branches (1.0s, 1.7 MB, next: 22:44:00)
+09:59:18 INFO  Starting RepoVault with 5 repositories
+09:59:18 INFO  github.com/msxdan/homelab-private: Cloning repository...
+09:59:18 INFO  github.com/msxdan/dotfiles: Cloning repository...
+09:59:18 INFO  github.com/msxdan/marvincloud.io: Cloning repository...
+09:59:18 INFO  github.com/msxdan/dotfiles_private: Cloning repository...
+09:59:18 INFO  github.com/msxdan/zet: Cloning repository...
+09:59:20 INFO  github.com/msxdan/dotfiles_private: Clone completed
+09:59:20 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
+09:59:20 INFO  github.com/msxdan/dotfiles: Clone completed
+09:59:20 INFO  github.com/msxdan/homelab-private: Clone completed
+09:59:20 INFO  github.com/msxdan/dotfiles_private: 1/1
+09:59:20 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (1.7s, 1.7 MB, next: 20:59:20)
+09:59:20 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
+09:59:20 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
+09:59:21 INFO  github.com/msxdan/marvincloud.io: Clone completed
+09:59:21 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
+09:59:21 INFO  github.com/msxdan/dotfiles: 2/2
+09:59:21 INFO  github.com/msxdan/dotfiles: Synced 2 branches (2.5s, 2.8 MB, next: 20:59:21)
+09:59:21 INFO  github.com/msxdan/homelab-private: 2/2
+09:59:21 INFO  github.com/msxdan/marvincloud.io: 1/1
+09:59:21 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (2.7s, 9.2 MB, next: 20:59:21)
+09:59:21 INFO  github.com/msxdan/homelab-private: Synced 2 branches (2.7s, 1.7 MB, next: 20:59:21)
+09:59:33 INFO  github.com/msxdan/zet: Cloning... (15s elapsed)
+09:59:41 INFO  github.com/msxdan/zet: Clone completed
+09:59:41 INFO  github.com/msxdan/zet: Syncing 1 branches...
+09:59:41 INFO  github.com/msxdan/zet: 1/1
+09:59:41 INFO  github.com/msxdan/zet: Synced 1 branches (23.4s, 201.3 MB, next: 20:59:41)
 ```
 
 ## Troubleshooting
