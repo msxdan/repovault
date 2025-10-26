@@ -172,7 +172,7 @@ auth:
 > [!WARNING]
 > Using `*` for branches can take a long time if there are many branches.
 
-> ![NOTE]
+> [!NOTE]
 > Recommended minimum period is `5m`.
 
 ## Authentication
