@@ -44,7 +44,7 @@ RUN set -ex && \
 RUN upx --best --lzma repovault
 
 # Final stage - minimal image
-FROM alpine:3.18
+FROM alpine:3.22
 
 # Install git, openssh (for SSH keys), and ca-certificates
 RUN apk add --no-cache \
