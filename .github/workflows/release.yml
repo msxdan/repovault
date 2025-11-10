@@ -74,9 +74,16 @@ jobs:
           # Get short commit SHA
           SHORT_SHA=$(git rev-parse --short HEAD)
 
+          # Explicitly fetch all tags to ensure we get the latest
+          git fetch --tags --force
+          
           # Get version from previous release or default to v0.0.0
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $LATEST_TAG"
+          
+          # Debug: show all tags to verify
+          echo "All tags:"
+          git tag --sort=-version:refname | head -5
 
           # Strip 'v' prefix and any existing commit hash/suffix
           CLEAN_VERSION=$(echo $LATEST_TAG | sed 's/^v//' | sed 's/-.*$//')
