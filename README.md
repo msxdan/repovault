@@ -21,6 +21,7 @@ Backs up git repositories on a schedule. Supports GitHub, GitLab, Bitbucket, and
 - Configurable backup retention (keep last N backups per branch)
 - Catch-up syncs after downtime
 - Wildcard branch support (`*` syncs all branches)
+- **Concurrency control** to prevent memory spikes (configurable)
 - SSH, HTTP, and token authentication
 - Works with multiple accounts per provider
 - Environment variable support in config
@@ -72,8 +73,10 @@ services:
     deploy:
       resources:
         limits:
+          memory: 2G  # Increase if syncing many large repos
+          cpus: "2"
+        reservations:
           memory: 512M
-          cpus: "0.5"
 ```
 
 ### **Building from source:**
@@ -100,6 +103,7 @@ defaults:
   period: "30m"
   backup_retention: 5 # Keep last 5 backups per branch
   log_level: "normal" # Options: "verbose", "normal", "quiet"
+  max_concurrent_repos: 3 # Max repos to sync simultaneously (prevents memory spikes)
 
 repositories:
   # GitHub with token auth
@@ -136,11 +140,12 @@ repositories:
 
 ### Global Defaults
 
-| Field                       | Description                          | Default      | Example                            |
-| --------------------------- | ------------------------------------ | ------------ | ---------------------------------- |
-| `defaults.period`           | Default sync interval for all repos  | Required     | `"30m"`, `"1h"`                    |
-| `defaults.backup_retention` | Number of backups to keep per branch | 0 (disabled) | `5`                                |
-| `defaults.log_level`        | Default log level                    | `"normal"`   | `"verbose"`, `"normal"`, `"quiet"` |
+| Field                          | Description                                      | Default      | Example                            |
+| ------------------------------ | ------------------------------------------------ | ------------ | ---------------------------------- |
+| `defaults.period`              | Default sync interval for all repos              | Required     | `"30m"`, `"1h"`                    |
+| `defaults.backup_retention`    | Number of backups to keep per branch             | 0 (disabled) | `5`                                |
+| `defaults.log_level`           | Default log level                                | `"normal"`   | `"verbose"`, `"normal"`, `"quiet"` |
+| `defaults.max_concurrent_repos` | Max repos to sync simultaneously (prevents OOM) | 3            | `2`, `5`                           |
 
 ### Repository Options
 
@@ -268,6 +273,31 @@ repositories:
     log_level: "quiet" # Override for specific repo
 ```
 
+## Memory Usage & Concurrency
+
+RepoVault limits the number of repositories that sync concurrently to prevent memory spikes. By default, only **3 repositories** sync at once during initial startup.
+
+### Why This Matters
+
+- **Initial clones** are memory-intensive (can use 1-2GB per large repo)
+- **Concurrent operations** multiply memory usage
+- **After initial sync**, periodic updates use minimal memory
+
+### Adjusting Concurrency
+
+```yaml
+defaults:
+  max_concurrent_repos: 2  # Lower if you have limited memory
+  # max_concurrent_repos: 5  # Higher if you have plenty of RAM
+```
+
+**Memory Guidelines:**
+- `max_concurrent_repos: 2` → ~1.5GB RAM recommended
+- `max_concurrent_repos: 3` → ~2GB RAM recommended (default)
+- `max_concurrent_repos: 5` → ~3-4GB RAM recommended
+
+**Note:** After initial sync completes, all repositories enter their periodic sync loops which use much less memory.
+
 ## Missed Sync Recovery
 
 RepoVault tracks sync times in `<backup-dir>/.repovault-state.json`. On startup, it checks for missed syncs and catches up automatically.
@@ -275,39 +305,39 @@ RepoVault tracks sync times in `<backup-dir>/.repovault-state.json`. On startup,
 Example: If your last sync was 7 hours ago and your period is 3 hours, RepoVault will sync immediately on startup, then resume the normal schedule.
 
 ```
-23:40:29 INFO  github.com/username/my-app: Missed sync detected (last sync: 7h ago), performing catch-up sync
+2025-01-10 23:40:29 INFO  github.com/username/my-app: Missed sync detected (last sync: 7h ago), performing catch-up sync
 ```
 
 ## Example Output
 
 ```shell
-09:59:18 INFO  Starting RepoVault with 5 repositories
-09:59:18 INFO  github.com/msxdan/homelab-private: Cloning repository...
-09:59:18 INFO  github.com/msxdan/dotfiles: Cloning repository...
-09:59:18 INFO  github.com/msxdan/marvincloud.io: Cloning repository...
-09:59:18 INFO  github.com/msxdan/dotfiles_private: Cloning repository...
-09:59:18 INFO  github.com/msxdan/zet: Cloning repository...
-09:59:20 INFO  github.com/msxdan/dotfiles_private: Clone completed
-09:59:20 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
-09:59:20 INFO  github.com/msxdan/dotfiles: Clone completed
-09:59:20 INFO  github.com/msxdan/homelab-private: Clone completed
-09:59:20 INFO  github.com/msxdan/dotfiles_private: 1/1
-09:59:20 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (1.7s, 1.7 MB, next: 20:59:20)
-09:59:20 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
-09:59:20 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
-09:59:21 INFO  github.com/msxdan/marvincloud.io: Clone completed
-09:59:21 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
-09:59:21 INFO  github.com/msxdan/dotfiles: 2/2
-09:59:21 INFO  github.com/msxdan/dotfiles: Synced 2 branches (2.5s, 2.8 MB, next: 20:59:21)
-09:59:21 INFO  github.com/msxdan/homelab-private: 2/2
-09:59:21 INFO  github.com/msxdan/marvincloud.io: 1/1
-09:59:21 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (2.7s, 9.2 MB, next: 20:59:21)
-09:59:21 INFO  github.com/msxdan/homelab-private: Synced 2 branches (2.7s, 1.7 MB, next: 20:59:21)
-09:59:33 INFO  github.com/msxdan/zet: Cloning... (15s elapsed)
-09:59:41 INFO  github.com/msxdan/zet: Clone completed
-09:59:41 INFO  github.com/msxdan/zet: Syncing 1 branches...
-09:59:41 INFO  github.com/msxdan/zet: 1/1
-09:59:41 INFO  github.com/msxdan/zet: Synced 1 branches (23.4s, 201.3 MB, next: 20:59:41)
+2025-01-10 09:59:18 INFO  Starting RepoVault with 5 repositories (max 3 concurrent)
+2025-01-10 09:59:18 INFO  github.com/msxdan/homelab-private: Cloning repository...
+2025-01-10 09:59:18 INFO  github.com/msxdan/dotfiles: Cloning repository...
+2025-01-10 09:59:18 INFO  github.com/msxdan/marvincloud.io: Cloning repository...
+2025-01-10 09:59:18 INFO  github.com/msxdan/dotfiles_private: Cloning repository...
+2025-01-10 09:59:18 INFO  github.com/msxdan/zet: Cloning repository...
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles_private: Clone completed
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles_private: Syncing 1 branches...
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles: Clone completed
+2025-01-10 09:59:20 INFO  github.com/msxdan/homelab-private: Clone completed
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles_private: 1/1
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles_private: Synced 1 branches (1.7s, next: 20:59:20)
+2025-01-10 09:59:20 INFO  github.com/msxdan/dotfiles: Syncing 2 branches...
+2025-01-10 09:59:20 INFO  github.com/msxdan/homelab-private: Syncing 2 branches...
+2025-01-10 09:59:21 INFO  github.com/msxdan/marvincloud.io: Clone completed
+2025-01-10 09:59:21 INFO  github.com/msxdan/marvincloud.io: Syncing 1 branches...
+2025-01-10 09:59:21 INFO  github.com/msxdan/dotfiles: 2/2
+2025-01-10 09:59:21 INFO  github.com/msxdan/dotfiles: Synced 2 branches (2.5s, next: 20:59:21)
+2025-01-10 09:59:21 INFO  github.com/msxdan/homelab-private: 2/2
+2025-01-10 09:59:21 INFO  github.com/msxdan/marvincloud.io: 1/1
+2025-01-10 09:59:21 INFO  github.com/msxdan/marvincloud.io: Synced 1 branches (2.7s, next: 20:59:21)
+2025-01-10 09:59:21 INFO  github.com/msxdan/homelab-private: Synced 2 branches (2.7s, next: 20:59:21)
+2025-01-10 09:59:33 INFO  github.com/msxdan/zet: Cloning... (15s elapsed)
+2025-01-10 09:59:41 INFO  github.com/msxdan/zet: Clone completed
+2025-01-10 09:59:41 INFO  github.com/msxdan/zet: Syncing 1 branches...
+2025-01-10 09:59:41 INFO  github.com/msxdan/zet: 1/1
+2025-01-10 09:59:41 INFO  github.com/msxdan/zet: Synced 1 branches (23.4s, next: 20:59:41)
 ```
 
 ## Troubleshooting
