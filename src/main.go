@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,17 +42,18 @@ type Config struct {
 }
 
 type Defaults struct {
-	Period          string `yaml:"period,omitempty"`
-	BackupRetention int    `yaml:"backup_retention,omitempty"` // Number of backups to keep per branch
-	LogLevel        string `yaml:"log_level,omitempty"`        // "verbose", "normal", "quiet"
+	Period             string `yaml:"period,omitempty"`
+	BackupRetention    int    `yaml:"backup_retention,omitempty"`     // Number of backups to keep per branch
+	LogLevel           string `yaml:"log_level,omitempty"`            // "verbose", "normal", "quiet"
+	MaxConcurrentRepos int    `yaml:"max_concurrent_repos,omitempty"` // Max number of repos to sync concurrently (default: 3)
 }
 
 type Repository struct {
 	Name            string   `yaml:"name"`
 	URL             string   `yaml:"url"`
 	Branches        []string `yaml:"branches"`
-	Path            string   `yaml:"path,omitempty"`            // Optional, defaults to name
-	Period          string   `yaml:"period,omitempty"`          // Optional, defaults to global period
+	Path            string   `yaml:"path,omitempty"`             // Optional, defaults to name
+	Period          string   `yaml:"period,omitempty"`           // Optional, defaults to global period
 	BackupRetention int      `yaml:"backup_retention,omitempty"` // Number of backups to keep per branch (overrides default)
 	LogLevel        string   `yaml:"log_level,omitempty"`        // Override log level for this repo
 	Auth            Auth     `yaml:"auth"`
@@ -74,6 +77,7 @@ type RepoVault struct {
 	useColors  bool
 	state      *SyncState
 	stateMutex sync.Mutex
+	semaphore  chan struct{} // Semaphore to limit concurrent repo operations
 }
 
 // SyncState tracks the last sync time for each repository
@@ -113,6 +117,12 @@ func NewRepoVault(configPath, baseDir string) (*RepoVault, error) {
 		state = newSyncState()
 	}
 
+	// Set default max concurrent repos if not specified
+	maxConcurrent := config.Defaults.MaxConcurrentRepos
+	if maxConcurrent <= 0 {
+		maxConcurrent = 3 // Default to 3 concurrent repos
+	}
+
 	return &RepoVault{
 		config:    config,
 		ctx:       ctx,
@@ -121,6 +131,7 @@ func NewRepoVault(configPath, baseDir string) (*RepoVault, error) {
 		logger:    log.New(os.Stdout, "", 0), // No prefix, we'll handle our own
 		useColors: useColors,
 		state:     state,
+		semaphore: make(chan struct{}, maxConcurrent), // Buffered channel as semaphore
 	}, nil
 }
 
@@ -180,12 +191,11 @@ func (rv *RepoVault) updateLastSync(repoID string) {
 	rv.state.LastSyncs[repoID] = time.Now()
 	rv.stateMutex.Unlock()
 
-	// Save state asynchronously to avoid blocking
-	go func() {
-		if err := rv.saveSyncState(); err != nil {
-			rv.logWarn("Failed to save sync state: %v", err)
-		}
-	}()
+	// Save state synchronously to avoid goroutine pile-up
+	// This is fast enough (just writing a small JSON file)
+	if err := rv.saveSyncState(); err != nil {
+		rv.logWarn("Failed to save sync state: %v", err)
+	}
 }
 
 // shouldPerformCatchupSync checks if a catchup sync is needed
@@ -212,7 +222,7 @@ func (rv *RepoVault) colorize(color, text string) string {
 }
 
 func (rv *RepoVault) logInfo(format string, args ...interface{}) {
-	timestamp := time.Now().Format("15:04:05")
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
 	rv.logger.Printf("%s %s %s",
 		rv.colorize(ColorGray, timestamp),
@@ -221,7 +231,7 @@ func (rv *RepoVault) logInfo(format string, args ...interface{}) {
 }
 
 func (rv *RepoVault) logWarn(format string, args ...interface{}) {
-	timestamp := time.Now().Format("15:04:05")
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
 	rv.logger.Printf("%s %s %s",
 		rv.colorize(ColorGray, timestamp),
@@ -230,7 +240,7 @@ func (rv *RepoVault) logWarn(format string, args ...interface{}) {
 }
 
 func (rv *RepoVault) logError(format string, args ...interface{}) {
-	timestamp := time.Now().Format("15:04:05")
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
 	rv.logger.Printf("%s %s %s",
 		rv.colorize(ColorGray, timestamp),
@@ -239,7 +249,7 @@ func (rv *RepoVault) logError(format string, args ...interface{}) {
 }
 
 func (rv *RepoVault) logSuccess(format string, args ...interface{}) {
-	timestamp := time.Now().Format("15:04:05")
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
 	rv.logger.Printf("%s %s %s",
 		rv.colorize(ColorGray, timestamp),
@@ -248,7 +258,9 @@ func (rv *RepoVault) logSuccess(format string, args ...interface{}) {
 }
 
 func (rv *RepoVault) Start() {
-	rv.logInfo("Starting RepoVault with %d repositories", len(rv.config.Repositories))
+	maxConcurrent := cap(rv.semaphore)
+	rv.logInfo("Starting RepoVault with %d repositories (max %d concurrent)",
+		len(rv.config.Repositories), maxConcurrent)
 
 	for _, repo := range rv.config.Repositories {
 		rv.wg.Add(1)
@@ -263,6 +275,15 @@ func (rv *RepoVault) Start() {
 	rv.logInfo("Shutting down...")
 	rv.cancel()
 	rv.wg.Wait()
+
+	// Final state save before exit
+	if err := rv.saveSyncState(); err != nil {
+		rv.logWarn("Failed to save final state: %v", err)
+	}
+
+	// Force GC to clean up before exit
+	runtime.GC()
+
 	rv.logInfo("RepoVault stopped")
 }
 
@@ -292,6 +313,9 @@ func (rv *RepoVault) syncRepository(repo Repository) {
 
 	repoID := rv.extractRepoIdentifier(repo.URL)
 
+	// Acquire semaphore for initial sync to limit concurrent operations
+	rv.semaphore <- struct{}{}
+
 	// Check if a catch-up sync is needed
 	if rv.shouldPerformCatchupSync(repoID, period) {
 		rv.stateMutex.Lock()
@@ -306,6 +330,9 @@ func (rv *RepoVault) syncRepository(repo Repository) {
 		// Initial sync (or regular startup if already up-to-date)
 		rv.performSync(repo, period, repoID)
 	}
+
+	// Release semaphore after initial sync completes, before entering ticker loop
+	<-rv.semaphore
 
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()
@@ -345,7 +372,8 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration, repoID s
 		return
 	}
 
-	// Check if repository already exists
+	// Open repository fresh each time to reduce memory footprint
+	// We trade some CPU for significant memory savings
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		// Repository doesn't exist, clone it
@@ -364,6 +392,12 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration, repoID s
 		}
 		rv.logInfo("%s: Clone completed", repoID)
 	}
+
+	// Ensure we release the git repo object when done with this sync
+	// This allows GC to free the memory
+	defer func() {
+		gitRepo = nil
+	}()
 
 	// Sync branches
 	branches := repo.Branches
@@ -476,25 +510,40 @@ func (rv *RepoVault) performSync(repo Repository, period time.Duration, repoID s
 	totalDuration := time.Since(startTime)
 	nextSync := time.Now().Add(period).Format("15:04:05")
 
-	// Calculate repository size
+	// Only calculate repository size in verbose mode to save CPU and memory
+	var sizeStr string
 	if logLevel == "verbose" {
 		rv.logInfo("%s: Calculating repository size...", repoID)
+		repoSize := rv.calculateRepoSize(repoPath)
+		sizeStr = rv.formatBytes(repoSize)
 	}
-	repoSize := rv.calculateRepoSize(repoPath)
-	sizeStr := rv.formatBytes(repoSize)
 
 	if logLevel != "quiet" {
 		if successCount == totalBranches {
-			rv.logInfo("%s: Synced %d branches (%.1fs, %s, next: %s)",
-				repoID, successCount, totalDuration.Seconds(), sizeStr, nextSync)
+			if sizeStr != "" {
+				rv.logInfo("%s: Synced %d branches (%.1fs, %s, next: %s)",
+					repoID, successCount, totalDuration.Seconds(), sizeStr, nextSync)
+			} else {
+				rv.logInfo("%s: Synced %d branches (%.1fs, next: %s)",
+					repoID, successCount, totalDuration.Seconds(), nextSync)
+			}
 		} else {
-			rv.logWarn("%s: Synced %d/%d branches (%.1fs, %s, next: %s)",
-				repoID, successCount, totalBranches, totalDuration.Seconds(), sizeStr, nextSync)
+			if sizeStr != "" {
+				rv.logWarn("%s: Synced %d/%d branches (%.1fs, %s, next: %s)",
+					repoID, successCount, totalBranches, totalDuration.Seconds(), sizeStr, nextSync)
+			} else {
+				rv.logWarn("%s: Synced %d/%d branches (%.1fs, next: %s)",
+					repoID, successCount, totalBranches, totalDuration.Seconds(), nextSync)
+			}
 		}
 	}
 
 	// Update last sync time for this repository
 	rv.updateLastSync(repoID)
+
+	// Suggest garbage collection after sync to free up memory from git operations
+	// This is non-blocking and just gives a hint to the GC
+	runtime.GC()
 }
 
 func (rv *RepoVault) cloneRepository(url, path string, auth transport.AuthMethod) (*git.Repository, error) {
@@ -517,7 +566,8 @@ func (rv *RepoVault) getAllRemoteBranches(repo *git.Repository, auth transport.A
 		return nil, err
 	}
 
-	var branches []string
+	// Pre-allocate with a reasonable capacity to reduce allocations
+	branches := make([]string, 0, 16)
 	for _, ref := range refs {
 		if ref.Name().IsBranch() {
 			branchName := ref.Name().Short()
@@ -536,17 +586,27 @@ func (rv *RepoVault) syncBranch(repo *git.Repository, repoID, branchName string,
 		return result
 	}
 
-	// Fetch all refs first
+	// Fetch all refs first (only fetch specific branch to save bandwidth and memory)
 	err = repo.Fetch(&git.FetchOptions{
 		Auth: auth,
 		RefSpecs: []config.RefSpec{
-			config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+			config.RefSpec("+refs/heads/" + branchName + ":refs/remotes/origin/" + branchName),
 		},
+		Force: true,
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
-		// Only log fetch errors if they're serious
-		if err.Error() != "already up-to-date" {
-			rv.logWarn("%s/%s: Fetch warning: %v", repoID, branchName, err)
+		// Fallback to fetching all refs if specific branch fetch fails
+		err = repo.Fetch(&git.FetchOptions{
+			Auth: auth,
+			RefSpecs: []config.RefSpec{
+				config.RefSpec("+refs/heads/*:refs/remotes/origin/*"),
+			},
+		})
+		if err != nil && err != git.NoErrAlreadyUpToDate {
+			// Only log fetch errors if they're serious
+			if err.Error() != "already up-to-date" {
+				rv.logWarn("%s/%s: Fetch warning: %v", repoID, branchName, err)
+			}
 		}
 	}
 
@@ -692,10 +752,10 @@ func (rv *RepoVault) getAuth(authConfig Auth) (transport.AuthMethod, error) {
 
 		publicKey, err := ssh.NewPublicKeys("git", sshKey, passphrase)
 		if err != nil {
-				if strings.Contains(err.Error(), "bcrypt_pbkdf") && passphrase == "" {
-						return nil, fmt.Errorf("SSH key appears to be encrypted but no passphrase provided. Add 'ssh_key_password' to your config")
-				}
-				return nil, fmt.Errorf("failed to parse SSH key: %v", err)
+			if strings.Contains(err.Error(), "bcrypt_pbkdf") && passphrase == "" {
+				return nil, fmt.Errorf("SSH key appears to be encrypted but no passphrase provided. Add 'ssh_key_password' to your config")
+			}
+			return nil, fmt.Errorf("failed to parse SSH key: %v", err)
 		}
 
 		// Disable host key checking
@@ -775,7 +835,8 @@ func (rv *RepoVault) cleanupOldBackups(repo *git.Repository, repoID, branchName 
 		ref  *plumbing.Reference
 		time time.Time
 	}
-	var backups []backupRef
+	// Pre-allocate slice to reduce allocations
+	backups := make([]backupRef, 0, keepCount+10)
 
 	backupPrefix := "refs/backups/"
 	err = refs.ForEach(func(ref *plumbing.Reference) error {
@@ -927,16 +988,21 @@ func hasBlockingChanges(status git.Status) bool {
 }
 
 // isPureUntracked indicates both staging and worktree are untracked
-func isPureUntracked(s *git.FileStatus) bool { return s.Staging == git.Untracked && s.Worktree == git.Untracked }
+func isPureUntracked(s *git.FileStatus) bool {
+	return s.Staging == git.Untracked && s.Worktree == git.Untracked
+}
 
 // isChange indicates any modification/add/delete/rename for tracked content
-func isChange(s *git.FileStatus) bool { return !isPureUntracked(s) && (s.Staging != git.Unmodified || s.Worktree != git.Unmodified) }
+func isChange(s *git.FileStatus) bool {
+	return !isPureUntracked(s) && (s.Staging != git.Unmodified || s.Worktree != git.Unmodified)
+}
 
 // Extract repository identifier from URL for logging
 // Examples:
-//   https://github.com/user/repo.git -> github.com/user/repo
-//   git@gitlab.com:org/project.git -> gitlab.com/org/project
-//   https://git.company.com/team/app.git -> git.company.com/team/app
+//
+//	https://github.com/user/repo.git -> github.com/user/repo
+//	git@gitlab.com:org/project.git -> gitlab.com/org/project
+//	https://git.company.com/team/app.git -> git.company.com/team/app
 func (rv *RepoVault) extractRepoIdentifier(url string) string {
 	// Remove .git suffix if present (TrimSuffix is clearer)
 	url = strings.TrimSuffix(url, ".git")
@@ -968,6 +1034,11 @@ func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("Usage: repovault <config.yaml> [base-directory]")
 	}
+
+	// Set GC to run more aggressively to reduce memory usage
+	// GOGC=50 means GC triggers when heap grows 50% (default is 100%)
+	// This trades some CPU for lower memory usage
+	debug.SetGCPercent(50)
 
 	configPath := os.Args[1]
 	baseDir := "/backup"

@@ -4,10 +4,10 @@ services:
     image: ghcr.io/msxdan/repovault:latest
     container_name: repovault
     restart: unless-stopped
+    # Run as host user to match file permissions (ssh-keys, backup)
+    user: "1000:1000"
     environment:
       - TZ=CET
-      - PUID=1001
-      - PGID=1001
     env_file:
       - .env # Load secrets from .env file
     volumes:
@@ -19,11 +19,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G  # Increased from 1G to handle concurrent operations (default: 3 concurrent repos)
           cpus: "2"
         reservations:
-          memory: 256M
-          cpus: "0.25"
+          memory: 512M  # Increased from 256M
+          cpus: "0.5"   # Increased from 0.25
     logging:
       driver: "json-file"
       options:
@@ -31,10 +31,10 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD", "pgrep", "repovault"]
-      interval: 30s
+      interval: 60s       # Increased from 30s to reduce false positives during heavy operations
       timeout: 10s
-      retries: 3
-      start_period: 10s
+      retries: 5          # Increased from 3 to be more lenient
+      start_period: 120s  # Increased from 10s to allow initial clones to complete
 
 networks:
   default:

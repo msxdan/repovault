@@ -1,4 +1,11 @@
 # config.yaml
+# Global defaults (optional)
+defaults:
+  period: "30m"                # Default sync period for all repos
+  backup_retention: 5          # Keep last 5 backups per branch
+  log_level: "normal"          # Options: "verbose", "normal", "quiet"
+  max_concurrent_repos: 3      # Max repos to sync simultaneously (prevents memory spikes)
+
 repositories:
 # Repository with specific branches and HTTP auth
 - name: "main-app"
